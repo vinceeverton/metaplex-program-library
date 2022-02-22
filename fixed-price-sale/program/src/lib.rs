@@ -5,20 +5,22 @@ pub mod utils;
 use crate::{
     error::ErrorCode,
     state::{
-        Market, MarketState, SecondaryMetadataCreators, SellingResource, SellingResourceState,
-        Store, TradeHistory,
+        Market, MarketState, PrimaryMetadataCreators, SellingResource, SellingResourceState, Store,
+        TradeHistory,
     },
     utils::{
         assert_derivation, assert_keys_equal, mpl_mint_new_edition_from_master_edition_via_token,
-        mpl_update_metadata_accounts_v2, mpl_update_primary_sale_happened_via_token,
-        puffed_out_string, sys_create_account, sys_transfer, DESCRIPTION_MAX_LEN,
-        FLAG_ACCOUNT_SIZE, HISTORY_PREFIX, HOLDER_PREFIX, MAX_SECONDARY_CREATORS_LEN, NAME_MAX_LEN,
-        PAYOUT_TICKET_PREFIX, SECONDARY_METADATA_CREATORS_PREFIX, VAULT_OWNER_PREFIX,
+        mpl_update_primary_sale_happened_via_token, puffed_out_string, sys_create_account,
+        sys_transfer, DESCRIPTION_MAX_LEN, FLAG_ACCOUNT_SIZE, HISTORY_PREFIX, HOLDER_PREFIX,
+        MAX_PRIMARY_CREATORS_LEN, NAME_MAX_LEN, PAYOUT_TICKET_PREFIX,
+        PRIMARY_METADATA_CREATORS_PREFIX, VAULT_OWNER_PREFIX,
     },
 };
 use anchor_lang::{
     prelude::*,
-    solana_program::{program::invoke, program_pack::Pack, system_instruction},
+    solana_program::{
+        borsh::try_from_slice_unchecked, program::invoke, program_pack::Pack, system_instruction,
+    },
     AnchorDeserialize, AnchorSerialize, System,
 };
 use anchor_spl::{
@@ -277,6 +279,25 @@ pub mod fixed_price_sale {
             ],
         )?;
 
+        // Update primary sale flag
+        let metadata_state =
+            mpl_token_metadata::state::Metadata::from_account_info(&master_edition_metadata)?;
+        if !metadata_state.primary_sale_happened {
+            let signer_seeds: &[&[&[u8]]] = &[&[
+                VAULT_OWNER_PREFIX.as_bytes(),
+                selling_resource.resource.as_ref(),
+                selling_resource.store.as_ref(),
+                &[vault_owner_bump],
+            ]];
+
+            mpl_update_primary_sale_happened_via_token(
+                &master_edition_metadata.to_account_info(),
+                &owner.to_account_info(),
+                &vault.to_account_info(),
+                signer_seeds[0],
+            )?;
+        }
+
         trade_history.already_bought = trade_history
             .already_bought
             .checked_add(1)
@@ -496,12 +517,27 @@ pub mod fixed_price_sale {
             ],
         )?;
 
-        // Check, that funder is `Creator` or `Market` owner
+        // Obtain right creators according to sale type
         let metadata = mpl_token_metadata::state::Metadata::from_account_info(&metadata)?;
+        let actual_creators = if metadata.primary_sale_happened {
+            let remaining_accounts = ctx.remaining_accounts;
+            if remaining_accounts.len() == 0 {
+                return Err(ErrorCode::PrimaryMetadataCreatorsNotProvided.into());
+            }
 
+            let primary_metadata_creators_data = remaining_accounts[0].data.borrow()[8..].to_vec();
+            let primary_metadata_creators = try_from_slice_unchecked::<PrimaryMetadataCreators>(
+                &primary_metadata_creators_data,
+            )?;
+            Box::new(Some(primary_metadata_creators.creators))
+        } else {
+            Box::new(metadata.data.creators)
+        };
+
+        // Check, that funder is `Creator` or `Market` owner
         // `Some` mean funder is `Creator`
         // `None` mean funder is `Market` owner
-        let funder_creator = if let Some(creators) = metadata.data.creators {
+        let funder_creator = if let Some(creators) = *actual_creators {
             let funder_creator = creators.iter().find(|&c| c.address == funder_key).cloned();
             if funder_creator.is_none() && funder_key != market.owner {
                 return Err(ErrorCode::FunderIsInvalid.into());
@@ -773,7 +809,6 @@ pub mod fixed_price_sale {
         let vault = &ctx.accounts.vault;
         let metadata = &ctx.accounts.metadata;
         let vault_owner = &ctx.accounts.owner;
-        let secondary_metadata_creators = &ctx.accounts.secondary_metadata_creators;
         let destination = &ctx.accounts.destination;
         let clock = &ctx.accounts.clock;
         let treasury_holder = &ctx.accounts.treasury_holder;
@@ -837,42 +872,6 @@ pub mod fixed_price_sale {
             )?;
         }
 
-        if !secondary_metadata_creators.data_is_empty()
-            && secondary_metadata_creators.lamports() > 0
-        {
-            // Check, that provided `SecondaryMetadataCreators` is correct
-            assert_derivation(
-                &id(),
-                secondary_metadata_creators,
-                &[
-                    SECONDARY_METADATA_CREATORS_PREFIX.as_bytes(),
-                    metadata.key.as_ref(),
-                ],
-            )?;
-
-            let secondary_metadata_creators = SecondaryMetadataCreators::try_deserialize(
-                &mut secondary_metadata_creators.data.borrow().as_ref(),
-            )?;
-
-            mpl_update_metadata_accounts_v2(
-                metadata,
-                vault_owner,
-                None,
-                Some(mpl_token_metadata::state::DataV2 {
-                    collection: metadata_state.collection,
-                    creators: Some(secondary_metadata_creators.creators),
-                    name: metadata_state.data.name,
-                    seller_fee_basis_points: metadata_state.data.seller_fee_basis_points,
-                    symbol: metadata_state.data.symbol,
-                    uri: metadata_state.data.uri,
-                    uses: metadata_state.uses,
-                }),
-                None,
-                Some(false),
-                signer_seeds[0],
-            )?;
-        }
-
         // Transfer token(ownership)
         let cpi_program = token_program.to_account_info();
         let cpi_accounts = token::Transfer {
@@ -886,17 +885,17 @@ pub mod fixed_price_sale {
         Ok(())
     }
 
-    pub fn create_secondary_metadata_creators<'info>(
-        ctx: Context<'_, '_, '_, 'info, CreateSecondaryMetadataCreators<'info>>,
-        _secondary_metadata_creators_bump: u8,
+    pub fn save_primary_metadata_creators<'info>(
+        ctx: Context<'_, '_, '_, 'info, SavePrimaryMetadataCreators<'info>>,
+        _primary_metadata_creators_bump: u8,
         creators: Vec<mpl_token_metadata::state::Creator>,
     ) -> ProgramResult {
         let metadata = &ctx.accounts.metadata;
         let admin = &ctx.accounts.admin;
-        let secondary_metadata_creators = &mut ctx.accounts.secondary_metadata_creators;
+        let primary_metadata_creators = &mut ctx.accounts.primary_metadata_creators;
         let metadata_state = mpl_token_metadata::state::Metadata::from_account_info(&metadata)?;
 
-        if creators.len() > MAX_SECONDARY_CREATORS_LEN {
+        if creators.len() > MAX_PRIMARY_CREATORS_LEN {
             return Err(ErrorCode::CreatorsIsGtThanAvailable.into());
         }
 
@@ -914,7 +913,7 @@ pub mod fixed_price_sale {
 
         assert_keys_equal(metadata_state.update_authority, *admin.key)?;
 
-        secondary_metadata_creators.creators = creators;
+        primary_metadata_creators.creators = creators;
 
         Ok(())
     }
@@ -987,7 +986,7 @@ pub struct Buy<'info> {
     vault: Box<Account<'info, TokenAccount>>,
     #[account(seeds=[VAULT_OWNER_PREFIX.as_bytes(), selling_resource.resource.as_ref(), selling_resource.store.as_ref()], bump=vault_owner_bump)]
     owner: UncheckedAccount<'info>,
-    #[account(owner=mpl_token_metadata::id())]
+    #[account(mut, owner=mpl_token_metadata::id())]
     master_edition_metadata: UncheckedAccount<'info>,
     clock: Sysvar<'info, Clock>,
     rent: Sysvar<'info, Rent>,
@@ -1073,7 +1072,6 @@ pub struct ClaimResource<'info> {
     metadata: UncheckedAccount<'info>,
     #[account(seeds=[VAULT_OWNER_PREFIX.as_bytes(), selling_resource.resource.key().as_ref(), selling_resource.store.as_ref()], bump=vault_owner_bump)]
     owner: UncheckedAccount<'info>,
-    secondary_metadata_creators: UncheckedAccount<'info>,
     #[account(mut)]
     destination: Box<Account<'info, TokenAccount>>,
     clock: Sysvar<'info, Clock>,
@@ -1101,13 +1099,13 @@ pub struct CreateMarket<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(secondary_metadata_creators_bump: u8, creators: Vec<mpl_token_metadata::state::Creator>)]
-pub struct CreateSecondaryMetadataCreators<'info> {
+#[instruction(primary_metadata_creators_bump: u8, creators: Vec<mpl_token_metadata::state::Creator>)]
+pub struct SavePrimaryMetadataCreators<'info> {
     #[account(mut)]
     admin: Signer<'info>,
     #[account(mut, owner=mpl_token_metadata::id())]
     metadata: UncheckedAccount<'info>,
-    #[account(init, space=SecondaryMetadataCreators::LEN, payer=admin, seeds=[SECONDARY_METADATA_CREATORS_PREFIX.as_bytes(), metadata.key.as_ref()], bump = secondary_metadata_creators_bump)]
-    secondary_metadata_creators: Box<Account<'info, SecondaryMetadataCreators>>,
+    #[account(init, space=PrimaryMetadataCreators::LEN, payer=admin, seeds=[PRIMARY_METADATA_CREATORS_PREFIX.as_bytes(), metadata.key.as_ref()], bump = primary_metadata_creators_bump)]
+    primary_metadata_creators: Box<Account<'info, PrimaryMetadataCreators>>,
     system_program: Program<'info, System>,
 }

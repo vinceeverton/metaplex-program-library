@@ -14,15 +14,21 @@ mod withdraw {
         accounts as mpl_fixed_price_sale_accounts, instruction as mpl_fixed_price_sale_instruction,
         state::SellingResource,
         utils::{
-            find_payout_ticket_address, find_trade_history_address, find_treasury_owner_address,
-            find_vault_owner_address,
+            find_payout_ticket_address, find_primary_metadata_creators, find_trade_history_address,
+            find_treasury_owner_address, find_vault_owner_address,
         },
     };
     use solana_program::clock::Clock;
     use solana_program_test::*;
     use solana_sdk::{
-        account::ReadableAccount, instruction::Instruction, program_pack::Pack, pubkey::Pubkey,
-        signature::Keypair, signer::Signer, system_program, sysvar, transaction::Transaction,
+        account::ReadableAccount,
+        instruction::{AccountMeta, Instruction},
+        program_pack::Pack,
+        pubkey::Pubkey,
+        signature::Keypair,
+        signer::Signer,
+        system_program, sysvar,
+        transaction::Transaction,
         transport::TransportError,
     };
 
@@ -39,7 +45,7 @@ mod withdraw {
                 100,
                 None,
                 true,
-                false,
+                true,
             )
             .await;
 
@@ -243,6 +249,43 @@ mod withdraw {
             &mpl_token_metadata::id(),
         );
 
+        let (primary_metadata_creators, primary_metadata_creators_bump) =
+            find_primary_metadata_creators(&master_edition_metadata);
+
+        // SavePrimaryMetadataCreators
+        let accounts = mpl_fixed_price_sale_accounts::SavePrimaryMetadataCreators {
+            admin: selling_resource_owner_keypair.pubkey(),
+            metadata: master_edition_metadata,
+            primary_metadata_creators,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(None);
+
+        let data = mpl_fixed_price_sale_instruction::SavePrimaryMetadataCreators {
+            _primary_metadata_creators_bump: primary_metadata_creators_bump,
+            creators: vec![mpl_token_metadata::state::Creator {
+                address: context.payer.pubkey(),
+                verified: false,
+                share: 100,
+            }],
+        }
+        .data();
+
+        let instruction = Instruction {
+            program_id: mpl_fixed_price_sale::id(),
+            data,
+            accounts,
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &selling_resource_owner_keypair],
+            context.last_blockhash,
+        );
+
+        context.banks_client.process_transaction(tx).await.unwrap();
+
         // Buy
         let accounts = mpl_fixed_price_sale_accounts::Buy {
             market: market_keypair.pubkey(),
@@ -336,7 +379,7 @@ mod withdraw {
             &mpl_token_metadata::id(),
         );
 
-        let accounts = mpl_fixed_price_sale_accounts::Withdraw {
+        let mut accounts = mpl_fixed_price_sale_accounts::Withdraw {
             market: market_keypair.pubkey(),
             selling_resource: selling_resource_keypair.pubkey(),
             metadata,
@@ -354,6 +397,7 @@ mod withdraw {
             system_program: system_program::id(),
         }
         .to_account_metas(None);
+        accounts.push(AccountMeta::new(primary_metadata_creators, false));
 
         let data = mpl_fixed_price_sale_instruction::Withdraw {
             payout_ticket_bump,
@@ -392,7 +436,7 @@ mod withdraw {
             .unwrap();
         let destination_token_acc =
             spl_token::state::Account::unpack(&destination_acc.data).unwrap();
-        assert_eq!(destination_token_acc.amount, 1000000);
+        assert_eq!(destination_token_acc.amount, 0);
     }
 
     #[tokio::test]
@@ -408,7 +452,7 @@ mod withdraw {
                 100,
                 None,
                 true,
-                false,
+                true,
             )
             .await;
 
@@ -580,6 +624,43 @@ mod withdraw {
             &mpl_token_metadata::id(),
         );
 
+        // SavePrimaryMetadataCreators
+        let (primary_metadata_creators, primary_metadata_creators_bump) =
+            find_primary_metadata_creators(&master_edition_metadata);
+
+        let accounts = mpl_fixed_price_sale_accounts::SavePrimaryMetadataCreators {
+            admin: selling_resource_owner_keypair.pubkey(),
+            metadata: master_edition_metadata,
+            primary_metadata_creators,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(None);
+
+        let data = mpl_fixed_price_sale_instruction::SavePrimaryMetadataCreators {
+            _primary_metadata_creators_bump: primary_metadata_creators_bump,
+            creators: vec![mpl_token_metadata::state::Creator {
+                address: context.payer.pubkey(),
+                verified: false,
+                share: 100,
+            }],
+        }
+        .data();
+
+        let instruction = Instruction {
+            program_id: mpl_fixed_price_sale::id(),
+            data,
+            accounts,
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &selling_resource_owner_keypair],
+            context.last_blockhash,
+        );
+
+        context.banks_client.process_transaction(tx).await.unwrap();
+
         // Buy
         let accounts = mpl_fixed_price_sale_accounts::Buy {
             market: market_keypair.pubkey(),
@@ -670,7 +751,7 @@ mod withdraw {
             &mpl_token_metadata::id(),
         );
 
-        let accounts = mpl_fixed_price_sale_accounts::Withdraw {
+        let mut accounts = mpl_fixed_price_sale_accounts::Withdraw {
             market: market_keypair.pubkey(),
             selling_resource: selling_resource_keypair.pubkey(),
             metadata,
@@ -688,6 +769,7 @@ mod withdraw {
             system_program: system_program::id(),
         }
         .to_account_metas(None);
+        accounts.push(AccountMeta::new(primary_metadata_creators, false));
 
         let data = mpl_fixed_price_sale_instruction::Withdraw {
             payout_ticket_bump,
@@ -725,7 +807,7 @@ mod withdraw {
             .unwrap()
             .unwrap();
 
-        assert_eq!(destination_acc.lamports(), 9997714880);
+        assert_eq!(destination_acc.lamports(), 9994578160);
     }
 
     #[tokio::test]
@@ -1454,7 +1536,7 @@ mod withdraw {
                 100,
                 None,
                 true,
-                false,
+                true,
             )
             .await;
 
@@ -1658,6 +1740,43 @@ mod withdraw {
             &mpl_token_metadata::id(),
         );
 
+        // SavePrimaryMetadataCreators
+        let (primary_metadata_creators, primary_metadata_creators_bump) =
+            find_primary_metadata_creators(&master_edition_metadata);
+
+        let accounts = mpl_fixed_price_sale_accounts::SavePrimaryMetadataCreators {
+            admin: selling_resource_owner_keypair.pubkey(),
+            metadata: master_edition_metadata,
+            primary_metadata_creators,
+            system_program: system_program::id(),
+        }
+        .to_account_metas(None);
+
+        let data = mpl_fixed_price_sale_instruction::SavePrimaryMetadataCreators {
+            _primary_metadata_creators_bump: primary_metadata_creators_bump,
+            creators: vec![mpl_token_metadata::state::Creator {
+                address: context.payer.pubkey(),
+                verified: false,
+                share: 100,
+            }],
+        }
+        .data();
+
+        let instruction = Instruction {
+            program_id: mpl_fixed_price_sale::id(),
+            data,
+            accounts,
+        };
+
+        let tx = Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&context.payer.pubkey()),
+            &[&context.payer, &selling_resource_owner_keypair],
+            context.last_blockhash,
+        );
+
+        context.banks_client.process_transaction(tx).await.unwrap();
+
         // Buy
         let accounts = mpl_fixed_price_sale_accounts::Buy {
             market: market_keypair.pubkey(),
@@ -1751,7 +1870,7 @@ mod withdraw {
             &mpl_token_metadata::id(),
         );
 
-        let accounts = mpl_fixed_price_sale_accounts::Withdraw {
+        let mut accounts = mpl_fixed_price_sale_accounts::Withdraw {
             market: market_keypair.pubkey(),
             selling_resource: selling_resource_keypair.pubkey(),
             metadata,
@@ -1769,6 +1888,7 @@ mod withdraw {
             system_program: system_program::id(),
         }
         .to_account_metas(None);
+        accounts.push(AccountMeta::new(primary_metadata_creators, false));
 
         let data = mpl_fixed_price_sale_instruction::Withdraw {
             payout_ticket_bump,
@@ -1795,7 +1915,7 @@ mod withdraw {
         context.warp_to_slot(clock.slot + 3).unwrap();
 
         // Withdraw
-        let accounts = mpl_fixed_price_sale_accounts::Withdraw {
+        let mut accounts = mpl_fixed_price_sale_accounts::Withdraw {
             market: market_keypair.pubkey(),
             selling_resource: selling_resource_keypair.pubkey(),
             metadata,
@@ -1813,6 +1933,7 @@ mod withdraw {
             system_program: system_program::id(),
         }
         .to_account_metas(None);
+        accounts.push(AccountMeta::new(primary_metadata_creators, false));
 
         let data = mpl_fixed_price_sale_instruction::Withdraw {
             payout_ticket_bump,
