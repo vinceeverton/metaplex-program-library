@@ -1,5 +1,6 @@
 mod utils;
 
+#[cfg(feature = "test-bpf")]
 mod buy {
     use crate::{
         setup_context,

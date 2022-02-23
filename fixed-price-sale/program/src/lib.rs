@@ -280,8 +280,7 @@ pub mod fixed_price_sale {
         )?;
 
         // Update primary sale flag
-        let metadata_state =
-            mpl_token_metadata::state::Metadata::from_account_info(&master_edition_metadata)?;
+        let metadata_state = mpl_token_metadata::state::Metadata::from_account_info(&new_metadata)?;
         if !metadata_state.primary_sale_happened {
             let signer_seeds: &[&[&[u8]]] = &[&[
                 VAULT_OWNER_PREFIX.as_bytes(),
@@ -291,7 +290,7 @@ pub mod fixed_price_sale {
             ]];
 
             mpl_update_primary_sale_happened_via_token(
-                &master_edition_metadata.to_account_info(),
+                &new_metadata.to_account_info(),
                 &owner.to_account_info(),
                 &vault.to_account_info(),
                 signer_seeds[0],
@@ -519,7 +518,7 @@ pub mod fixed_price_sale {
 
         // Obtain right creators according to sale type
         let metadata = mpl_token_metadata::state::Metadata::from_account_info(&metadata)?;
-        let actual_creators = if metadata.primary_sale_happened {
+        let actual_creators = if !metadata.primary_sale_happened {
             let remaining_accounts = ctx.remaining_accounts;
             if remaining_accounts.len() == 0 {
                 return Err(ErrorCode::PrimaryMetadataCreatorsNotProvided.into());
@@ -975,7 +974,7 @@ pub struct Buy<'info> {
     // Will be created by `mpl_token_metadata`
     #[account(mut)]
     new_edition: UncheckedAccount<'info>,
-    #[account(mut, owner=mpl_token_metadata::id())]
+    #[account(owner=mpl_token_metadata::id())]
     master_edition: UncheckedAccount<'info>,
     #[account(mut)]
     new_mint: Box<Account<'info, Mint>>,

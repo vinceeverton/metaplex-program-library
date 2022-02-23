@@ -1,5 +1,6 @@
 mod utils;
 
+#[cfg(feature = "test-bpf")]
 mod claim_resource {
     use crate::{
         setup_context,
