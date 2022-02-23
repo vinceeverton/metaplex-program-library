@@ -1,6 +1,5 @@
 mod utils;
 
-#[cfg(feature = "test-bpf")]
 mod withdraw {
     use crate::{
         setup_context,
@@ -301,6 +300,8 @@ mod withdraw {
             edition_marker,
             vault: selling_resource.vault,
             owner,
+            new_token_account: new_mint_token_account.pubkey(),
+            new_token_owner: payer_pubkey,
             master_edition_metadata,
             clock: sysvar::clock::id(),
             rent: sysvar::rent::id(),
@@ -676,6 +677,8 @@ mod withdraw {
             edition_marker,
             vault: selling_resource.vault,
             owner,
+            new_token_account: new_mint_token_account.pubkey(),
+            new_token_owner: payer_pubkey,
             master_edition_metadata,
             clock: sysvar::clock::id(),
             rent: sysvar::rent::id(),
@@ -1042,6 +1045,8 @@ mod withdraw {
             edition_marker,
             vault: selling_resource.vault,
             owner,
+            new_token_account: new_mint_token_account.pubkey(),
+            new_token_owner: payer_pubkey,
             master_edition_metadata,
             clock: sysvar::clock::id(),
             rent: sysvar::rent::id(),
@@ -1399,6 +1404,8 @@ mod withdraw {
             edition_marker,
             vault: selling_resource.vault,
             owner,
+            new_token_account: new_mint_token_account.pubkey(),
+            new_token_owner: payer_pubkey,
             master_edition_metadata,
             clock: sysvar::clock::id(),
             rent: sysvar::rent::id(),
@@ -1792,6 +1799,8 @@ mod withdraw {
             edition_marker,
             vault: selling_resource.vault,
             owner,
+            new_token_account: new_mint_token_account.pubkey(),
+            new_token_owner: payer_pubkey,
             master_edition_metadata,
             clock: sysvar::clock::id(),
             rent: sysvar::rent::id(),

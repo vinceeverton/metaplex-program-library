@@ -163,18 +163,20 @@ pub mod fixed_price_sale {
     ) -> ProgramResult {
         let market = &mut ctx.accounts.market;
         let selling_resource = &mut ctx.accounts.selling_resource;
-        let user_token_account = &mut ctx.accounts.user_token_account;
+        let user_token_account = Box::new(&ctx.accounts.user_token_account);
         let user_wallet = &mut ctx.accounts.user_wallet;
         let trade_history = &mut ctx.accounts.trade_history;
-        let treasury_holder = &mut ctx.accounts.treasury_holder;
-        let new_metadata = &mut ctx.accounts.new_metadata;
-        let new_edition = &mut ctx.accounts.new_edition;
-        let master_edition = &mut ctx.accounts.master_edition;
+        let treasury_holder = Box::new(&ctx.accounts.treasury_holder);
+        let new_metadata = Box::new(&ctx.accounts.new_metadata);
+        let new_edition = Box::new(&ctx.accounts.new_edition);
+        let master_edition = Box::new(&ctx.accounts.master_edition);
         let new_mint = &mut ctx.accounts.new_mint;
         let edition_marker_info = &mut ctx.accounts.edition_marker.to_account_info();
         let vault = &mut ctx.accounts.vault;
-        let owner = &mut ctx.accounts.owner;
-        let master_edition_metadata = &mut ctx.accounts.master_edition_metadata;
+        let owner = Box::new(&ctx.accounts.owner);
+        let new_token_account = &ctx.accounts.new_token_account;
+        let new_token_owner = &ctx.accounts.new_token_owner;
+        let master_edition_metadata = Box::new(&ctx.accounts.master_edition_metadata);
         let clock = &ctx.accounts.clock;
         let rent = &ctx.accounts.rent;
         let token_program = &ctx.accounts.token_program;
@@ -282,18 +284,11 @@ pub mod fixed_price_sale {
         // Update primary sale flag
         let metadata_state = mpl_token_metadata::state::Metadata::from_account_info(&new_metadata)?;
         if !metadata_state.primary_sale_happened {
-            let signer_seeds: &[&[&[u8]]] = &[&[
-                VAULT_OWNER_PREFIX.as_bytes(),
-                selling_resource.resource.as_ref(),
-                selling_resource.store.as_ref(),
-                &[vault_owner_bump],
-            ]];
-
             mpl_update_primary_sale_happened_via_token(
                 &new_metadata.to_account_info(),
-                &owner.to_account_info(),
-                &vault.to_account_info(),
-                signer_seeds[0],
+                &new_token_owner.to_account_info(),
+                &new_token_account.to_account_info(),
+                &[],
             )?;
         }
 
@@ -567,7 +562,7 @@ pub mod fixed_price_sale {
 
             token_account.amount
         };
-        let amount = if metadata.primary_sale_happened {
+        let amount = if !metadata.primary_sale_happened {
             if let Some(funder_creator) = funder_creator {
                 let share_bp = (funder_creator.share as u64)
                     .checked_mul(100)
@@ -958,14 +953,14 @@ pub struct CreateStore<'info> {
 #[instruction(trade_history_bump:u8, vault_owner_bump: u8)]
 pub struct Buy<'info> {
     #[account(mut, has_one=treasury_holder)]
-    market: Account<'info, Market>,
+    market: Box<Account<'info, Market>>,
     #[account(mut)]
     selling_resource: Box<Account<'info, SellingResource>>,
     #[account(mut)]
     user_token_account: UncheckedAccount<'info>,
     user_wallet: Signer<'info>,
     #[account(init_if_needed, seeds=[HISTORY_PREFIX.as_bytes(), user_wallet.key().as_ref(), market.key().as_ref()], bump=trade_history_bump, payer=user_wallet)]
-    trade_history: Account<'info, TradeHistory>,
+    trade_history: Box<Account<'info, TradeHistory>>,
     #[account(mut)]
     treasury_holder: UncheckedAccount<'info>,
     // Will be created by `mpl_token_metadata`
@@ -974,7 +969,7 @@ pub struct Buy<'info> {
     // Will be created by `mpl_token_metadata`
     #[account(mut)]
     new_edition: UncheckedAccount<'info>,
-    #[account(owner=mpl_token_metadata::id())]
+    #[account(mut, owner=mpl_token_metadata::id())]
     master_edition: UncheckedAccount<'info>,
     #[account(mut)]
     new_mint: Box<Account<'info, Mint>>,
@@ -985,6 +980,9 @@ pub struct Buy<'info> {
     vault: Box<Account<'info, TokenAccount>>,
     #[account(seeds=[VAULT_OWNER_PREFIX.as_bytes(), selling_resource.resource.as_ref(), selling_resource.store.as_ref()], bump=vault_owner_bump)]
     owner: UncheckedAccount<'info>,
+    #[account(mut, constraint = new_token_account.owner == new_token_owner.key())]
+    new_token_account: Box<Account<'info, TokenAccount>>,
+    new_token_owner: Signer<'info>,
     #[account(mut, owner=mpl_token_metadata::id())]
     master_edition_metadata: UncheckedAccount<'info>,
     clock: Sysvar<'info, Clock>,
