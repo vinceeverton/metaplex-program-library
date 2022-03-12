@@ -2,12 +2,14 @@
 //! AuctionHouse is a protocol for marketplaces to implement a decentralized sales contract. It is simple, fast and very cheap. AuctionHouse is a Solana program available on Mainnet Beta and Devnet. Anyone can create an AuctionHouse and accept any SPL token they wish.
 //!
 //! Full docs can be found [here](https://docs.metaplex.com/auction-house/definition).
+pub mod auction;
 pub mod bid;
+pub mod config;
 pub mod constants;
 pub mod pda;
 pub mod receipt;
 pub mod utils;
-use crate::{bid::*, constants::*, receipt::*, utils::*};
+use crate::{auction::*, bid::*, constants::*, receipt::*, utils::*};
 use anchor_lang::{
     prelude::*,
     solana_program::{
@@ -1084,6 +1086,46 @@ pub mod auction_house {
     ) -> ProgramResult {
         receipt::print_purchase_receipt(ctx, purchase_receipt_bump)
     }
+
+    pub fn create_auction_listing<'info>(
+        ctx: Context<ListForSale>,
+        auction_trade_state_bump: u8,
+        program_as_signer_bump: u8,
+        token_size: u64,
+        min_price: u64,
+        ends_at: u32,
+        sale_authority_must_sign: bool,
+        high_bid_amount: u64,
+        high_bid_trade_state: Pubkey,
+    ) -> ProgramResult {
+        auction::list_for_sale(
+            ctx,
+            auction_trade_state_bump,
+            program_as_signer_bump,
+            token_size,
+            min_price,
+            ends_at,
+            sale_authority_must_sign,
+            high_bid_amount,
+            high_bid_trade_state,
+        )
+    }
+
+    // pub fn cancel_auction_listing(ctx: Context<CancelListing>) -> ProgramResult {
+    //     Ok(())
+    // }
+
+    // pub fn create_auction_bid(ctx: Context<Bid>) -> ProgramResult {
+    //     Ok(())
+    // }
+
+    // pub fn cancel_auction_bid(ctx: Context<CancelBid>) -> ProgramResult {
+    //     Ok(())
+    // }
+
+    // pub fn execute_auction_sale(ctx: Context<ExecuteAuctionSale>) -> ProgramResult {
+    //     Ok(())
+    // }
 }
 
 /// Accounts for the [`sell` handler](auction_house/fn.sell.html).

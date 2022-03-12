@@ -141,9 +141,12 @@ pub fn print_listing_receipt<'info>(
     let mut buffer = &prev_instruction.data[8..];
     let sell_data = Sell::deserialize(&mut buffer)?;
 
-    assert_program_instruction_equal(
-        &prev_instruction.data[..8],
-        [51, 230, 133, 164, 1, 127, 131, 173],
+    // Print Listing Receipt can be created for both instant sell and auction listing trade states.
+    assert_program_instruction_equal(&prev_instruction.data[..8], INSTANT_SELL_SIGHASH).or(
+        assert_program_instruction_equal(
+            &prev_instruction.data[..8],
+            CREATE_AUCTION_LISTING_SIGHASH,
+        ),
     )?;
 
     assert_keys_equal(prev_instruction.program_id, id())?;
